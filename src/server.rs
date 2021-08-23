@@ -6,9 +6,14 @@ pub mod Server {
     use async_std::net::TcpStream;
 
     use futures::stream::StreamExt;
+    use futures::Future;
 
     use std::collections::HashMap;
     use std::io::Error;
+    use std::pin::Pin;
+
+    //todo research why this works and if we are still async
+    pub type RequestCallback = dyn Fn(&Request) -> Pin<Box<dyn Future<Output=Response>>>;
 
     #[derive(Debug)]
     pub struct Request {
@@ -35,7 +40,7 @@ pub mod Server {
     }
 
     impl Response {
-        fn default() -> Self {
+        pub fn default() -> Self {
             Self {
                 status_code: String::from("200"),
                 data: String::from("")
@@ -50,7 +55,7 @@ pub mod Server {
     }
 
     pub struct App {
-        pub routes: HashMap<String, Box<dyn Fn(&Request, &mut Response)>>
+        pub routes: HashMap<String, Box<RequestCallback>>
     }
 
     impl App {
@@ -60,7 +65,7 @@ pub mod Server {
             }
         }
 
-        pub fn add_route(&mut self, method: &str, path: &str, callback: Box<dyn Fn(&Request, &mut Response)>) {
+        pub fn add_route(&mut self, method: &str, path: &str, callback: Box<RequestCallback>) {
             let key = format!("{} {}", method, path);
 
             self.routes.entry(key).or_insert(callback);
@@ -75,17 +80,14 @@ pub mod Server {
         
             let response = App::handle_request(&self.routes, req);
         
-            stream.write_all(response.build().as_bytes()).await?;
+            stream.write_all(response.await.build().as_bytes()).await?;
             stream.flush().await?;
         
             return Ok(());
         }
 
         //handling request like this is gross. callbacks maybe or [get("/")] [post("/submit")]
-        fn handle_request(routes: &HashMap<String, Box<dyn Fn(&Request, &mut Response)>>, req: Request) -> Response {
-            let mut res = Response::default();
-            res.status_code = String::from("404");
-
+        async fn handle_request(routes: &HashMap<String, Box<RequestCallback>>, req: Request) -> Response {            
             let key = format!("{} {}", req.method, req.path);
             println!("Route Key {}", key);
 
@@ -94,8 +96,11 @@ pub mod Server {
             //some middleware could probably go here (eg. Auth, Session Management, Logging, etc)
 
 
+            let mut res = Response::default();
+            res.status_code = String::from("404");
+
             if let Some(call_back) = value {
-                call_back(&req, &mut res); //yeah, callbacks
+                res = call_back(&req).await; //yeah, ASYNC callbacks !!!!!!
             }
             
             return res;

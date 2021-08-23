@@ -10,8 +10,14 @@ futures = "0.3"
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 uuid = { version = "0.8", features = ["v4"] }
+bcrypt = "0.10"
 
 
 [dependencies.async-std]
 version = "1.9"
 features = ["attributes"]
+
+[dependencies.mongodb]
+version = "2.0.0-beta.3"
+default-features = false
+features = ["async-std-runtime"]
