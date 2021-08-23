@@ -11,7 +11,8 @@ use std::io::Error;
 struct Request {
     method: String,
     path: String,
-    attributes: HashMap<String, String>
+    attributes: HashMap<String, String>,
+    body: String,
 }
 
 impl Request {
@@ -19,7 +20,8 @@ impl Request {
         Self {
             method: String::from(""),
             path: String::from(""),
-            attributes: HashMap::new()
+            attributes: HashMap::new(),
+            body: String::from("")
         }
     }
 }
@@ -45,7 +47,7 @@ impl Response {
 }
 
 struct App {
-    routes: HashMap<String, Box<dyn Fn(&mut Response)>>
+    routes: HashMap<String, Box<dyn Fn(&Request, &mut Response)>>
 }
 
 impl App {
@@ -55,7 +57,7 @@ impl App {
         }
     }
 
-    fn add_route(&mut self, method: &str, path: &str, callback: Box<dyn Fn(&mut Response)>) {
+    fn add_route(&mut self, method: &str, path: &str, callback: Box<dyn Fn(&Request, &mut Response)>) {
         let key = format!("{} {}", method, path);
 
         self.routes.entry(key).or_insert(callback);
@@ -77,15 +79,20 @@ impl App {
     }
 
     //handling request like this is gross. callbacks maybe or [get("/")] [post("/submit")]
-    fn handle_request(routes: &HashMap<String, Box<dyn Fn(&mut Response)>>, req: Request) -> Response {
+    fn handle_request(routes: &HashMap<String, Box<dyn Fn(&Request, &mut Response)>>, req: Request) -> Response {
         let mut res = Response::default();
         res.status_code = String::from("404");
 
         let key = format!("{} {}", req.method, req.path);
+        println!("Route Key {}", key);
+
         let value = routes.get(&key);
 
+        //some middleware could probably go here (eg. Auth, Session Management, Logging, etc)
+
+
         if let Some(call_back) = value {
-            call_back(&mut res);
+            call_back(&req, &mut res); //yeah, callbacks
         }
         
         return res;
@@ -96,7 +103,7 @@ impl App {
 
         println!("Server started!");
 
-        let mut routes: HashMap<String, Box<dyn Fn(&mut Response)>> = HashMap::new();
+        let mut routes: HashMap<String, Box<dyn Fn(&Request, &mut Response)>> = HashMap::new();
         routes.insert(String::from("GET /"), Box::new(index));
 
         listener
@@ -112,21 +119,19 @@ impl App {
     }
 }
 
-#[async_std::main]
-async fn main() {
-    let mut my_app = App::new();
-    
-    //add routes
-    my_app.add_route("GET", "/", Box::new(index));
-
-    my_app.start(8080).await;
-}
-
 fn parse_request(raw_request: String) -> Request {
+    println!("{}",raw_request);
+    
     let mut request = Request::default();    
 
-    //turn input into array
-    let header: Vec<&str> = raw_request.trim_matches(char::from(0)).split("\r\n").collect();
+    //should split header and body
+    let request_vec: Vec<&str> = raw_request.trim_matches(char::from(0)).split("\r\n\r\n").collect();
+
+    //split header
+    let header: Vec<&str> = request_vec[0].split("\r\n").collect();
+    
+    //set the request body
+    request.body = request_vec[1].to_string();
 
     //get first line
     let first_line: Vec<&str> = header[0].split(" ").collect();        
@@ -153,7 +158,26 @@ fn parse_request(raw_request: String) -> Request {
     return request;
 }
 
-fn index(res: &mut Response) {
+fn index(req: &Request, res: &mut Response) {
     res.status_code = String::from("200");
     res.data = String::from("{'json': 'much wow'}");
+}
+
+fn create_ticket(req: &Request, res: &mut Response) {
+    
+    
+    
+    res.status_code = String::from("200");
+    res.data = req.body.clone();
+}
+
+#[async_std::main]
+async fn main() {
+    let mut my_app = App::new();
+    
+    //add routes
+    my_app.add_route("GET", "/", Box::new(index));
+    my_app.add_route("POST", "/ticket", Box::new(create_ticket));
+
+    my_app.start(8080).await;
 }
