@@ -13,14 +13,17 @@ pub mod Server {
     use std::pin::Pin;
 
     //todo research why this works and if we are still async
-    pub type RequestCallback = dyn Fn(&Request) -> Pin<Box<dyn Future<Output=Response>>>;
+    pub type RequestCallback = dyn Fn(&Connection) -> LabResult;
+    pub type MiddlewareCallback = dyn Fn(&Connection) -> LabResult;
+    pub type LabResult = Pin<Box<dyn Future<Output=Connection>>>;
 
-    #[derive(Debug)]
+    #[derive(Debug, Clone)]
     pub struct Request {
         pub method: String,
         pub path: String,
         pub attributes: HashMap<String, String>,
         pub body: String,
+        pub is_authenticated: bool
     }
 
     impl Request {
@@ -29,11 +32,19 @@ pub mod Server {
                 method: String::from(""),
                 path: String::from(""),
                 attributes: HashMap::new(),
-                body: String::from("")
+                body: String::from(""),
+                is_authenticated: false
             }
         }
     }
 
+    #[derive(Debug, Clone)]
+    pub struct Connection {
+        pub request: Request,
+        pub response: Response
+    }
+
+    #[derive(Debug, Clone)]
     pub struct Response {
         pub status_code: String,
         pub data: String
@@ -55,13 +66,15 @@ pub mod Server {
     }
 
     pub struct App {
-        pub routes: HashMap<String, Box<RequestCallback>>
+        pub routes: HashMap<String, Box<RequestCallback>>,
+        pub middlewares: Vec<Box<MiddlewareCallback>>
     }
 
     impl App {
         pub fn new() -> Self {
             Self {
-                routes: HashMap::new()
+                routes: HashMap::new(),
+                middlewares: Vec::new()
             }
         }
 
@@ -71,6 +84,10 @@ pub mod Server {
             self.routes.entry(key).or_insert(callback);
         }
 
+        pub fn add_middleware(&mut self, callback: Box<MiddlewareCallback>) {
+            self.middlewares.push(callback);
+        }
+
         async fn handle_connection(&self, mut stream: TcpStream) -> Result<(), Error>{
             let mut buffer = [0; 1024];
         
@@ -78,7 +95,7 @@ pub mod Server {
         
             let req = parse_request(String::from_utf8_lossy(&buffer[..]).to_string());
         
-            let response = App::handle_request(&self.routes, req);
+            let response = App::handle_request(&self.routes, &self.middlewares, req);
         
             stream.write_all(response.await.build().as_bytes()).await?;
             stream.flush().await?;
@@ -87,23 +104,30 @@ pub mod Server {
         }
 
         //handling request like this is gross. callbacks maybe or [get("/")] [post("/submit")]
-        async fn handle_request(routes: &HashMap<String, Box<RequestCallback>>, req: Request) -> Response {            
-            let key = format!("{} {}", req.method, req.path);
-            println!("Route Key {}", key);
-
-            let value = routes.get(&key);
-
+        async fn handle_request(routes: &HashMap<String, Box<RequestCallback>>, middlewares: &Vec<Box<MiddlewareCallback>>, request: Request) -> Response {            
+            let req = request.clone();
+            let res = Response::default();
+            
+            let mut conn = Connection {
+                request: req,
+                response: res
+            };
+            
             //some middleware could probably go here (eg. Auth, Session Management, Logging, etc)
-
-
-            let mut res = Response::default();
-            res.status_code = String::from("404");
-
-            if let Some(call_back) = value {
-                res = call_back(&req).await; //yeah, ASYNC callbacks !!!!!!
+            for middlware in middlewares {
+                conn = middlware(&conn).await;
             }
             
-            return res;
+            let key = format!("{} {}", conn.request.method, conn.request.path);
+            println!("Route Key {}", key);
+
+            let value = routes.get(&key);                        
+
+            if let Some(call_back) = value {
+                conn = call_back(&conn).await; //yeah, ASYNC callbacks !!!!!!
+            }
+            
+            return conn.response;
         }
 
         pub async fn start(&self, port: u32) {
