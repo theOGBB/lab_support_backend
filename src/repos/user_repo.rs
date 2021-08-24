@@ -1,3 +1,7 @@
+//File contains code needed to connect to mongodb and insert users into
+//the collection. Also contains the struct that mimics the user collection for
+//strongly typed interface to work with
+
 use super::mongo_config::*;
 
 use mongodb::{Client, options::ClientOptions};

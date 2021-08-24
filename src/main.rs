@@ -3,14 +3,15 @@ mod repos;
 
 use crate::server::Server::*;
 use crate::repos::user_repo::{UserRepo, User};
+use crate::repos::session_repo::{Session, SessionRepo};
 
+use chrono::{DateTime, Local, Duration};
 
 use serde::{Serialize, Deserialize};
 use serde_json::{Result, Value};
 
 use std::collections::HashMap;
 use std::pin::Pin;
-use std::time::Duration;
 
 use uuid::Uuid;
 
@@ -29,7 +30,7 @@ fn index(conn: &Connection) -> LabResult {
     Box::pin(async move {        
         cc.response.data = String::from(r#"{"json": "much wow"}"#);
 
-        sleep(Duration::from_secs(5)).await;
+        //sleep(Duration::from_secs(5)).await;
         
         return cc;
     })
@@ -58,11 +59,18 @@ fn authenticate(conn: &Connection) -> LabResult {
 
         if verify(params["password"].as_str().unwrap(), &user.hashed_password).unwrap() {
 
-            //TODO - generate token and save token data to persistent storage
+            let token = uuid::Uuid::new_v4().to_simple().to_string();
+            let session = Session {
+                token: token.clone(),
+                user_id: user.id,
+                expiration: (Local::now() + Duration::days(1)).to_rfc2822()
+            };
 
+            let session_repo = SessionRepo::new();
+            session_repo.insert_one(session).await;
 
             cc.response.status_code = String::from("200");
-            cc.response.data = format!("{{\"auth_token\": \"{}\"}}", uuid::Uuid::new_v4().to_simple());
+            cc.response.data = format!("{{\"auth_token\": \"{}\"}}", token);
         } else {
             cc.response.status_code = String::from("401");
             cc.response.data = String::from(r#"{"error": "Failed to validate user"}"#);
@@ -100,12 +108,36 @@ fn install(conn: &Connection) -> LabResult {
     })
 }
 
+//basic middleware that checks the request for a valid bearer token
+//if one is found the request is set as authenticated
 fn protect(conn: &Connection) -> LabResult {    
     let mut cc = conn.clone();
 
     Box::pin(async move {
-        cc.request.is_authenticated = true;
 
+        let auth_header = cc.request.attributes.get("Authorization").unwrap().to_string();
+        
+        let token = auth_header.replace("Bearer", "").trim().to_string();
+
+        println!("Auth token: {}", token);
+
+        let session = SessionRepo::new();
+        let active_session = session.find_by_token(token).await;
+
+        match active_session {
+            Some(s) => {
+                println!("{}", s.expiration);
+
+                if DateTime::parse_from_rfc3339(&s.expiration).unwrap() > Local::now() {
+                    cc.request.is_authenticated = true
+                }
+                else {
+                    cc.request.is_authenticated = false;
+                }
+            },
+            None => cc.request.is_authenticated = false
+        }
+        
         return cc;
     })
 }
