@@ -21,16 +21,18 @@ use futures::Future;
 
 use async_std::task::sleep;
 
-fn index(conn: &Connection) -> LabResult {
+fn index(conn: &Connection) -> LabResult {            
+    let mut cc = conn.clone();    
+
+    Box::pin(async move {
         
-    println!("{}", conn.request.is_authenticated);
-
-    let mut cc = conn.clone();
-
-    Box::pin(async move {        
-        cc.response.data = String::from(r#"{"json": "much wow"}"#);
-
-        //sleep(Duration::from_secs(5)).await;
+        if cc.request.is_authenticated {
+            cc.response.data = String::from(r#"{"json": "much wow"}"#);
+            cc.response.status_code = String::from("200");
+        } else {
+            cc.response.status_code = String::from("401");
+            cc.response.data = String::from(r#"{"error": "invalid authorization token"}"#);
+        }   
         
         return cc;
     })
@@ -113,30 +115,32 @@ fn install(conn: &Connection) -> LabResult {
 fn protect(conn: &Connection) -> LabResult {    
     let mut cc = conn.clone();
 
-    Box::pin(async move {
-
-        let auth_header = cc.request.attributes.get("Authorization").unwrap().to_string();
+    Box::pin(async move {        
         
-        let token = auth_header.replace("Bearer", "").trim().to_string();
+        if let Some(auth_header) = cc.request.attributes.get("Authorization") {
+            let token = auth_header.replace("Bearer", "").trim().to_string();
 
-        println!("Auth token: {}", token);
+            println!("Auth token: {}", token);
 
-        let session = SessionRepo::new();
-        let active_session = session.find_by_token(token).await;
+            let session = SessionRepo::new();            
 
-        match active_session {
-            Some(s) => {
-                println!("{}", s.expiration);
-
-                if DateTime::parse_from_rfc3339(&s.expiration).unwrap() > Local::now() {
+            if let Some(active_session) = session.find_by_token(token).await {                
+                if DateTime::parse_from_rfc2822(&active_session.expiration).unwrap() > Local::now() {
+                    //found valid session
                     cc.request.is_authenticated = true
                 }
                 else {
+                    //found expired session
                     cc.request.is_authenticated = false;
                 }
-            },
-            None => cc.request.is_authenticated = false
-        }
+            } else {
+                //no session found
+                cc.request.is_authenticated = false;
+            }            
+        } else {
+            //no auth token found in request
+            cc.request.is_authenticated = false;
+        }                
         
         return cc;
     })
