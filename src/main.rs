@@ -127,7 +127,7 @@ fn protect(conn: &Connection) -> LabResult {
             if let Some(active_session) = session.find_by_token(token).await {                
                 if DateTime::parse_from_rfc2822(&active_session.expiration).unwrap() > Local::now() {
                     //found valid session
-                    cc.request.is_authenticated = true
+                    cc.request.is_authenticated = true;
                 }
                 else {
                     //found expired session
