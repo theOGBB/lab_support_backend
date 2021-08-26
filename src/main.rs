@@ -2,7 +2,7 @@ mod server;
 mod repos;
 
 use crate::server::Server::*;
-use crate::repos::user_repo::{UserRepo, User};
+use crate::repos::user_repo::{UserRepo, User, UserClient};
 use crate::repos::session_repo::{Session, SessionRepo};
 
 use chrono::{DateTime, Local, Duration};
@@ -64,15 +64,21 @@ fn authenticate(conn: &Connection) -> LabResult {
             let token = uuid::Uuid::new_v4().to_simple().to_string();
             let session = Session {
                 token: token.clone(),
-                user_id: user.id,
+                user_id: user.id.clone(),
                 expiration: (Local::now() + Duration::days(1)).to_rfc2822()
             };
 
             let session_repo = SessionRepo::new();
             session_repo.insert_one(session).await;
 
+            let client_user = UserClient {
+                id: user.id.clone(),
+                user_name: user.user_name.clone(),
+                active_token: token.clone()
+            };
+            
             cc.response.status_code = String::from("200");
-            cc.response.data = format!("{{\"auth_token\": \"{}\"}}", token);
+            cc.response.data = serde_json::to_string(&client_user).unwrap();
         } else {
             cc.response.status_code = String::from("401");
             cc.response.data = String::from(r#"{"error": "Failed to validate user"}"#);
@@ -105,6 +111,18 @@ fn install(conn: &Connection) -> LabResult {
 
         cc.response.status_code = String::from("200");
         cc.response.data = String::from(r#"{"message": "user successfully created"}"#);
+
+        return cc;
+    })
+}
+
+fn enable_cors(conn: &Connection) -> LabResult {
+    let mut cc = conn.clone();
+
+    Box::pin(async move {
+        cc.response.headers.insert(String::from("Access-Control-Allow-Origin"), String::from("*"));
+        cc.response.headers.insert(String::from("Access-Control-Allow-Methods"), String::from("POST, GET, OPTIONS"));                        
+        cc.response.headers.insert(String::from("Access-Control-Allow-Headers"), String::from("Content-Type"));
 
         return cc;
     })
@@ -160,6 +178,7 @@ async fn main() {
 
     //middlewares
     my_app.add_middleware(Box::new(protect));
+    my_app.add_middleware(Box::new(enable_cors));
 
     my_app.start(8080).await;
 }

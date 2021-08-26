@@ -47,19 +47,33 @@ pub mod Server {
     #[derive(Debug, Clone)]
     pub struct Response {
         pub status_code: String,
-        pub data: String
+        pub data: String,
+        pub headers: HashMap<String, String>
     }
 
     impl Response {
         pub fn default() -> Self {
             Self {
                 status_code: String::from("200"),
-                data: String::from("")
+                data: String::from(""),
+                headers: HashMap::new()
             }
-        }
+        }        
 
         fn build(&self) -> String {
-            let s = format!("HTTP/1.1 {} OK\r\n\r\n {}", self.status_code, self.data);
+            let mut v: Vec<String> = Vec::new();
+
+            for (key, value) in self.headers.iter() {
+                v.push(format!("{}: {}", key, value));
+            }
+
+            let mut s = format!("HTTP/1.1 {} OK\r\n", self.status_code);
+
+            for i in v {
+                s = format!("{}{}\r\n", s, i);
+            }
+
+            s = format!("{}\r\n {}", s, self.data);
 
             return s;
         }

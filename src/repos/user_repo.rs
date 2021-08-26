@@ -61,6 +61,14 @@ pub struct User {
     pub hashed_password: String
 }
 
+//would return a list of roles here too
+#[derive(Serialize, Deserialize)]
+pub struct UserClient {
+    pub id: String,
+    pub user_name: String,
+    pub active_token: String
+}
+
 impl User {
     pub fn default() -> Self {
         Self {  
