@@ -62,10 +62,12 @@ fn authenticate(conn: &Connection) -> LabResult {
         if verify(params["password"].as_str().unwrap(), &user.hashed_password).unwrap() {
 
             let token = uuid::Uuid::new_v4().to_simple().to_string();
+            let expiration = (Local::now() + Duration::days(1)).to_rfc2822();
+
             let session = Session {
                 token: token.clone(),
                 user_id: user.id.clone(),
-                expiration: (Local::now() + Duration::days(1)).to_rfc2822()
+                expiration: expiration.clone()
             };
 
             let session_repo = SessionRepo::new();
@@ -74,7 +76,8 @@ fn authenticate(conn: &Connection) -> LabResult {
             let client_user = UserClient {
                 id: user.id.clone(),
                 user_name: user.user_name.clone(),
-                active_token: token.clone()
+                active_token: token.clone(),
+                token_expiration: expiration.clone()
             };
             
             cc.response.status_code = String::from("200");

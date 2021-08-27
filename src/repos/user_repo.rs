@@ -66,7 +66,8 @@ pub struct User {
 pub struct UserClient {
     pub id: String,
     pub user_name: String,
-    pub active_token: String
+    pub active_token: String,
+    pub token_expiration: String
 }
 
 impl User {
